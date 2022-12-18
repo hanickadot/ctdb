@@ -2,8 +2,7 @@
 #define CTDB_TABLE_HPP
 
 #include "indices/indices.hpp"
-#include <memory>
-#include <set>
+#include <list>
 #include <utility>
 #include <cassert>
 #include <compare>
@@ -37,94 +36,47 @@ template <typename T> struct table_range {
 	}
 };
 
+struct always_same {
+	constexpr bool operator()(const auto &, const auto &) const noexcept {
+		return false;
+	}
+};
+
 template <typename Record, typename... Indices> struct table {
-	struct primary_record;
+	using record_type = Record;
 
-	class primary_key {
-		const Record * record;
-		friend struct primary_record;
+	// TODO: use hive, to avoid many allocations
+	std::list<record_type> content;
+	using primary_key = typename decltype(content)::iterator;
 
-	public:
-		constexpr const Record & view_record() const noexcept {
-			assert(record != nullptr);
-			return *record;
-		}
+	static_assert(sizeof(primary_key) == sizeof(void *));
 
-		constexpr const Record & operator*() const noexcept {
-			assert(record != nullptr);
-			return *record;
-		}
-
-		constexpr primary_key(const Record * r) noexcept: record{r} { }
-		constexpr primary_key(const primary_key &) noexcept = default;
-		constexpr primary_key(primary_key &&) noexcept = default;
-		constexpr ~primary_key() noexcept = default;
-		constexpr auto operator=(const primary_key &) noexcept -> primary_key & = default;
-		constexpr auto operator=(primary_key &&) noexcept -> primary_key & = default;
-
-		explicit constexpr operator bool() const noexcept {
-			return record != nullptr;
-		}
-
-		friend constexpr bool operator==(primary_key, primary_key) noexcept = default;
-		friend constexpr bool operator==(primary_key lhs, std::nullptr_t) noexcept {
-			return lhs.record == nullptr;
-		}
-
-		friend constexpr auto operator<=>(primary_key lhs, primary_key rhs) noexcept = default;
-	};
-
-	struct primary_record: std::unique_ptr<Record> {
-		using super = std::unique_ptr<Record>;
-		using super::super;
-
-		explicit constexpr primary_record(std::unique_ptr<Record> orig) noexcept: super{std::move(orig)} { }
-
-		template <typename... Args> constexpr static auto make(Args &&... args) {
-			return primary_record{std::make_unique<Record>(std::forward<Args>(args)...)};
-		}
-
-		constexpr auto get_primary_key() const noexcept -> primary_key {
-			return primary_key(this->get());
-		}
-
-		friend constexpr bool operator==(const primary_record & lhs, const primary_record & rhs) noexcept {
-			return lhs.get() == rhs.et();
-		}
-
-		friend constexpr auto operator<=>(const primary_record & lhs, const primary_record & rhs) noexcept {
-			return std::compare_three_way{}(lhs.get(), rhs.get());
-		}
-
-		friend constexpr bool operator==(const primary_record & lhs, primary_key rhs) noexcept {
-			return lhs.get() == rhs.record;
-		}
-
-		friend constexpr auto operator<=>(const primary_record & lhs, primary_key rhs) noexcept {
-			return std::compare_three_way{}(lhs.get(), rhs.record);
-		}
-	};
-
-	// TODO: use hive without unique_ptr
-	std::set<primary_record, std::less<void>> content;
 	indices_tuple<primary_key, Indices...> indices;
 
-	template <typename... Args> constexpr auto emplace(Args &&... args) -> primary_key {
-		const auto [it, success] = content.emplace(primary_record::make(std::forward<Args>(args)...));
+	template <typename... Args> constexpr auto emplace(Args &&... args) -> std::optional<primary_key> {
+		// this will always insert new record at the end O(1)
+		const auto & item = content.emplace_front(std::forward<Args>(args)...);
+		const auto it = content.begin();
 
-		if (!success) {
-			return nullptr;
-		}
+		assert(item == *it);
 
-		const auto pkey = it->get_primary_key();
-		assert(success);
-
-		if (!indices.insert(pkey)) {
+		// and now insert into indices
+		if (!indices.insert(it)) {
+			// and if any of them fails, rollback
 			content.erase(it);
-			return nullptr;
+			return std::nullopt;
 		}
 
-		return pkey;
+		return it;
+	}
+
+	constexpr bool erase(primary_key it) noexcept {
+		if (indices.remove(it)) {
+			content.erase(it);
+			return true;
+		} else {
+			return false;
+		}
 	}
 
 	constexpr size_t size() const noexcept {
@@ -132,6 +84,7 @@ template <typename Record, typename... Indices> struct table {
 	}
 
 	template <typename Type> constexpr auto size() const noexcept {
+		// be aware of old GCC ABI!
 		return indices.template size<Type>();
 	}
 

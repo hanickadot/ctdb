@@ -1,5 +1,5 @@
-#include <catch2/catch_test_macros.hpp>
 #include <ctdb/table.hpp>
+#include <catch2/catch_test_macros.hpp>
 
 TEST_CASE("table") {
 	ctdb::table<std::string> tbl;
@@ -7,8 +7,8 @@ TEST_CASE("table") {
 	const auto a = tbl.emplace("hello");
 	const auto b = tbl.emplace("there");
 
-	REQUIRE(a != nullptr);
-	REQUIRE(b != nullptr);
+	REQUIRE(a != std::nullopt);
+	REQUIRE(b != std::nullopt);
 
 	REQUIRE(a != b);
 
@@ -16,7 +16,7 @@ TEST_CASE("table") {
 
 	const auto c = tbl.emplace("hello");
 
-	REQUIRE(c != nullptr);
+	REQUIRE(c != std::nullopt);
 	REQUIRE(tbl.size() == 3z);
 }
 
@@ -72,8 +72,8 @@ TEST_CASE("unique_index (sorted)") {
 	const auto a = tbl.emplace("hello");
 	const auto b = tbl.emplace("there");
 
-	REQUIRE(a != nullptr);
-	REQUIRE(b != nullptr);
+	REQUIRE(a != std::nullopt);
+	REQUIRE(b != std::nullopt);
 
 	REQUIRE(a != b);
 
@@ -81,12 +81,12 @@ TEST_CASE("unique_index (sorted)") {
 
 	const auto c = tbl.emplace("hello");
 
-	REQUIRE(c == nullptr);
+	REQUIRE(c == std::nullopt);
 	REQUIRE(tbl.size() == 2z);
 
 	const auto d = tbl.emplace("hana");
 
-	REQUIRE(d != nullptr);
+	REQUIRE(d != std::nullopt);
 	REQUIRE(tbl.size() == 3z);
 }
 
@@ -96,8 +96,8 @@ TEST_CASE("unique_index (unsorted)") {
 	const auto a = tbl.emplace("hello");
 	const auto b = tbl.emplace("there");
 
-	REQUIRE(a != nullptr);
-	REQUIRE(b != nullptr);
+	REQUIRE(a != std::nullopt);
+	REQUIRE(b != std::nullopt);
 
 	REQUIRE(a != b);
 
@@ -105,12 +105,12 @@ TEST_CASE("unique_index (unsorted)") {
 
 	const auto c = tbl.emplace("hello");
 
-	REQUIRE(c == nullptr);
+	REQUIRE(c == std::nullopt);
 	REQUIRE(tbl.size() == 2z);
 
 	const auto d = tbl.emplace("hana");
 
-	REQUIRE(d != nullptr);
+	REQUIRE(d != std::nullopt);
 	REQUIRE(tbl.size() == 3z);
 }
 
