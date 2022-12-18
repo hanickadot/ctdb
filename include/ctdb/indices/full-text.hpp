@@ -172,7 +172,16 @@ template <typename PKey, size_t N> struct simple_fulltext_reverse_index {
 		}
 	};
 
+	size_t count{0z};
 	std::map<ngram<N>, std::set<entry>> data;
+
+	size_t ngram_known() const noexcept {
+		return data.size();
+	}
+
+	size_t ngram_count() const noexcept {
+		return count;
+	}
 
 	auto emplace(view_as_ngrams<N> ngrams, PKey pkey) {
 		for (auto ngram: ngrams) {
@@ -184,6 +193,8 @@ template <typename PKey, size_t N> struct simple_fulltext_reverse_index {
 				auto it2 = data.emplace_hint(it, ngram.value, std::set<entry>{});
 				it2->second.emplace(pkey, ngram.position);
 			}
+
+			++count;
 		}
 	}
 
@@ -193,6 +204,7 @@ template <typename PKey, size_t N> struct simple_fulltext_reverse_index {
 			assert(it != data.end());
 
 			it->second.erase(entry{pkey, ngram.position});
+			--count;
 
 			if (it->second.empty()) {
 				data.erase(it);
@@ -222,44 +234,156 @@ template <typename PKey, size_t N> struct simple_fulltext_reverse_index {
 		}
 	}
 
-	auto find_first(view_as_ngrams<N> input) -> std::optional<PKey> {
-		std::cout << "SEARCHING FOR '" << input.input << "' ngram = " << input.size() << "\n";
+	static auto intersect(const std::set<entry> & lhs, unsigned lhs_offset, const std::set<entry> & rhs, unsigned rhs_offset) -> std::set<entry> {
+		std::set<entry> result;
 
-		std::map<entry, unsigned> candidates;
-
-		// TODO optimization
-
-		// total complexity is O(len * (log(n) + k * log(k)))
-
-		// O(len)
-		for (auto ng: input) {
-			// find ngram set O(log n)
-			const std::set<entry> * occurences = find_ngram_occurences(ng.value);
-
-			if (occurences == nullptr) {
-				std::cout << "not found [some of ngrams doesn't exists!]\n";
-				return std::nullopt;
+		// use shorter for linear scan
+		// O(a * log(b))
+		if (lhs.size() <= rhs.size()) {
+			for (const auto & lhs_entry: lhs) {
+				if (rhs.contains(entry{lhs_entry.pkey, lhs_entry.position - lhs_offset + rhs_offset})) {
+					result.emplace(entry{lhs_entry.pkey, lhs_entry.position - lhs_offset});
+				}
 			}
-
-			// increment each found item k * log(k)
-			for (const auto & e: *occurences) {
-				auto [it, success] = candidates.try_emplace(entry{e.pkey, e.position - ng.position}, 1);
-
-				if (!success) {
-					it->second++;
+		} else {
+			for (const auto & rhs_entry: rhs) {
+				if (lhs.contains(entry{rhs_entry.pkey, rhs_entry.position - rhs_offset + lhs_offset})) {
+					result.emplace(entry{rhs_entry.pkey, rhs_entry.position - rhs_offset});
 				}
 			}
 		}
 
-		std::cout << "found\n";
+		return result;
+	}
 
-		for (auto [e, count]: candidates) {
-			if (count == input.size()) {
-				std::cout << "  " << std::addressof(*e.pkey) << " '" << *e.pkey << "'@" << e.position << " (hit_count = " << count << ")\n";
+	static auto intersect(std::set<entry> && lhs, const std::set<entry> & rhs, unsigned offset) -> std::set<entry> {
+		if (lhs.size() <= rhs.size()) {
+			// erase each one which is not present in RHS
+			for (auto it = lhs.begin(); it != lhs.end();) {
+				// filter out everything which is not in RHS
+				if (!rhs.contains(entry{it->pkey, it->position + offset})) {
+					it = lhs.erase(it);
+				} else {
+					++it;
+				}
+			}
+
+			return lhs;
+		} else {
+			std::set<entry> result{};
+
+			// iterate over RHS and find each element from LHS, if it's there, extract it from LHS and move to result
+			for (const auto & rhs_entry: rhs) {
+				if (auto it = lhs.find(entry{rhs_entry.pkey, rhs_entry.position - offset}); it != lhs.end()) {
+					result.insert(lhs.extract(it));
+				}
+			}
+
+			return result;
+		}
+	}
+
+	struct ngram_matches {
+		ngram_with_position<N> value;
+		const std::set<entry> * matches;
+
+		constexpr ngram_matches(ngram_with_position<N> v, const std::set<entry> * m) noexcept: value{v}, matches{m} { }
+
+		constexpr size_t size() const noexcept {
+			if (matches) {
+				return matches->size();
+			} else {
+				return 0z;
 			}
 		}
 
-		return std::nullopt;
+		constexpr bool empty() const noexcept {
+			return size() == 0z;
+		}
+
+		constexpr friend auto operator<=>(ngram_matches lhs, ngram_matches rhs) noexcept {
+			const auto lhs_size = lhs.size();
+			const auto rhs_size = rhs.size();
+
+			return std::tie(lhs_size, lhs.value) <=> std::tie(rhs_size, rhs.value);
+		}
+
+		constexpr friend auto operator==(ngram_matches lhs, ngram_matches rhs) noexcept {
+			return lhs.value == rhs.value;
+		}
+
+		constexpr const std::set<entry> & get_set() const noexcept {
+			return *matches;
+		}
+
+		constexpr unsigned get_relative_position() const noexcept {
+			return value.position;
+		}
+	};
+
+	static auto intersect(const ngram_matches & lhs, const ngram_matches & rhs) -> std::set<entry> {
+		return intersect(lhs.get_set(), lhs.get_relative_position(), rhs.get_set(), rhs.get_relative_position());
+	}
+
+	static auto intersect(std::set<entry> && lhs, const ngram_matches & rhs) -> std::set<entry> {
+		return intersect(std::move(lhs), rhs.get_set(), rhs.get_relative_position());
+	}
+
+	auto get_sorted_ngram_matches(view_as_ngrams<N> input) const -> std::vector<ngram_matches> {
+		auto matches = std::vector<ngram_matches>{};
+		matches.reserve(input.size());
+
+		// TODO filter out unnecessory ngrams
+
+		for (auto ng: input) {
+			matches.emplace_back(ng, find_ngram_occurences(ng.value));
+		}
+
+		// we need to sort nmatches by size of each sets
+		std::sort(matches.begin(), matches.end());
+
+		return matches;
+	}
+
+	auto find_all(view_as_ngrams<N> input) -> std::set<entry> {
+		const auto matches = get_sorted_ngram_matches(input);
+
+		if (matches.empty()) {
+			// there was no ngram to match => can't search for size(input) < N
+			return {};
+		}
+
+		const auto & first_match = matches[0];
+
+		if (first_match.empty()) {
+			// first ngram doesn't match anything => result is empty
+			// this will be happen always for first element, as `matches` are sorted
+			return {};
+		}
+
+		if (matches.size() == 1z) {
+			// if there was only one ngram at all (we can't intersect it with anything)
+			return first_match.get_set();
+		}
+
+		const auto & second_match = matches[1];
+
+		// first two we intersect together (as they are immutable) and allocate all possible results
+		std::set<entry> result = intersect(first_match, second_match);
+
+		assert(result.size() <= first_match.size());
+		assert(result.size() <= second_match.size());
+
+		// and now we remove non matching items (for each subsequent ngram)
+		for (size_t i = 2z; i != matches.size(); ++i) {
+			[[maybe_unused]] const auto size_before = result.size();
+
+			result = intersect(std::move(result), matches[i]);
+
+			assert(result.size() <= size_before);
+		}
+
+		return result;
 	}
 };
 
