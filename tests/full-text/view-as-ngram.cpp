@@ -14,15 +14,15 @@ TEST_CASE("view_as_ngram basic") {
 	const auto end = rng.end();
 
 	REQUIRE(it != end);
-	REQUIRE(*it == ctdb::ngram<3>{"alo", 0});
+	REQUIRE(*it == ctdb::ngram_with_position<3>{"alo", 0});
 	++it;
 
 	REQUIRE(it != end);
-	REQUIRE(*it == ctdb::ngram<3>{"loh", 1});
+	REQUIRE(*it == ctdb::ngram_with_position<3>{"loh", 1});
 	++it;
 
 	REQUIRE(it != end);
-	REQUIRE(*it == ctdb::ngram<3>{"oha", 2});
+	REQUIRE(*it == ctdb::ngram_with_position<3>{"oha", 2});
 	++it;
 
 	REQUIRE(it == end);
@@ -31,13 +31,13 @@ TEST_CASE("view_as_ngram basic") {
 	REQUIRE(std::forward_iterator<decltype(it)>);
 
 	// try if we can iterate it
-	std::vector<ctdb::ngram<3>> vec;
+	std::vector<ctdb::ngram_with_position<3>> vec;
 
 	for (auto ngram: rng) {
 		vec.push_back(ngram);
 	}
 
-	REQUIRE(vec == std::vector<ctdb::ngram<3>>{{"alo", 0}, {"loh", 1}, {"oha", 2}});
+	REQUIRE(vec == std::vector<ctdb::ngram_with_position<3>>{{"alo", 0}, {"loh", 1}, {"oha", 2}});
 }
 
 constexpr auto convert_to_vector(auto && range) {

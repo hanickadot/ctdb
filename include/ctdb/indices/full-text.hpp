@@ -1,10 +1,17 @@
 #ifndef CTDB_INDICES_FULLTEXT_HPP
 #define CTDB_INDICES_FULLTEXT_HPP
 
+#include <algorithm>
 #include <limits>
+#include <map>
+#include <ostream>
+#include <set>
 #include <string_view>
 #include <cassert>
 #include <concepts>
+
+// iostream
+#include <iostream>
 
 namespace ctdb {
 
@@ -38,7 +45,6 @@ template <size_t N> struct ngram {
 	using value_type = std::array<char, N>;
 
 	value_type value;
-	unsigned position;
 
 protected:
 	static auto convert_pointer_to_value(const char * ptr) noexcept -> value_type {
@@ -50,9 +56,35 @@ protected:
 	}
 
 public:
-	constexpr ngram(const char * source, unsigned pos) noexcept: value{convert_pointer_to_value(source)}, position{pos} { }
+	constexpr ngram(const char * source) noexcept: value{convert_pointer_to_value(source)} { }
 
 	friend constexpr bool operator==(ngram, ngram) noexcept = default;
+	friend constexpr auto operator<=>(ngram lhs, ngram rhs) noexcept {
+		// clang doesn't have lexigraphical_three_way_compare yet
+		for (int i = 0; i != int(N); ++i) {
+			const auto r = lhs.value[i] <=> rhs.value[i];
+			if (!is_eq(r)) {
+				return r;
+			}
+		}
+		return std::strong_ordering::equivalent;
+	}
+
+	friend std::ostream & operator<<(std::ostream & os, const ngram & e) {
+		return os << "'" << std::string_view{e.value.data(), e.value.size()} << "'";
+	}
+};
+
+template <size_t N> struct ngram_with_position {
+	using value_type = ngram<N>;
+
+	value_type value;
+	unsigned position;
+
+	constexpr ngram_with_position(value_type val, unsigned pos) noexcept: value{val}, position{pos} { }
+
+	friend constexpr bool operator==(ngram_with_position, ngram_with_position) noexcept = default;
+	friend constexpr auto operator<=>(ngram_with_position, ngram_with_position) noexcept = default;
 };
 
 struct ngram_sentinel {
@@ -63,12 +95,12 @@ template <size_t N> struct ngram_iterator {
 	const char * base;
 	size_t position{0};
 
-	using value_type = ngram<N>;
+	using value_type = ngram_with_position<N>;
 	using difference_type = ssize_t;
 
 	constexpr auto operator*() const noexcept {
 		assert(position <= (std::numeric_limits<unsigned>::max)());
-		return ngram<N>{base + position, static_cast<unsigned>(position)};
+		return value_type{base + position, static_cast<unsigned>(position)};
 	}
 
 	constexpr friend bool operator==(ngram_iterator lhs, ngram_sentinel rhs) noexcept {
@@ -96,7 +128,7 @@ template <size_t N> struct ngram_iterator {
 };
 
 template <size_t N> struct view_as_ngrams {
-	using value_type = ngram<N>;
+	using value_type = ngram_with_position<N>;
 	std::string_view input;
 
 	constexpr view_as_ngrams(std::string_view in) noexcept: input{in} { }
@@ -111,6 +143,123 @@ template <size_t N> struct view_as_ngrams {
 
 	constexpr auto end() const noexcept {
 		return ngram_sentinel{input.size()};
+	}
+};
+
+template <typename PKey, size_t N> struct simple_fulltext_reverse_index {
+	struct entry {
+		PKey pkey;
+		unsigned position;
+
+		constexpr entry(PKey pk, unsigned pos) noexcept: pkey{pk}, position{pos} { }
+
+		friend constexpr bool operator==(const entry & lhs, const entry & rhs) noexcept {
+			const auto lhs_addr = std::addressof(*lhs.pkey);
+			const auto rhs_addr = std::addressof(*rhs.pkey);
+
+			return std::tie(lhs_addr, lhs.position) == std::tie(rhs_addr, rhs.position);
+		}
+
+		friend constexpr auto operator<=>(const entry & lhs, const entry & rhs) noexcept {
+			const auto lhs_addr = std::addressof(*lhs.pkey);
+			const auto rhs_addr = std::addressof(*rhs.pkey);
+
+			return std::tie(lhs_addr, lhs.position) <=> std::tie(rhs_addr, rhs.position);
+		}
+
+		friend std::ostream & operator<<(std::ostream & os, const entry & e) {
+			return os << std::addressof(*e.pkey) << " '" << *e.pkey << "'@" << e.value.position;
+		}
+	};
+
+	std::map<ngram<N>, std::set<entry>> data;
+
+	auto emplace(view_as_ngrams<N> ngrams, PKey pkey) {
+		for (auto ngram: ngrams) {
+			auto it = data.lower_bound(ngram.value);
+
+			if (it->first == ngram.value) {
+				it->second.emplace(pkey, ngram.position);
+			} else {
+				auto it2 = data.emplace_hint(it, ngram.value, std::set<entry>{});
+				it2->second.emplace(pkey, ngram.position);
+			}
+		}
+	}
+
+	auto remove(view_as_ngrams<N> ngrams, PKey pkey) {
+		for (auto ngram: ngrams) {
+			auto it = data.find(ngram.value);
+			assert(it != data.end());
+
+			it->second.erase(entry{pkey, ngram.position});
+
+			if (it->second.empty()) {
+				data.erase(it);
+			}
+		}
+	}
+
+	static constexpr auto convert_to_vector(auto && range) {
+		using value_type = std::remove_cvref_t<decltype(*range.begin())>;
+
+		std::vector<value_type> result{};
+
+		result.reserve(range.size());
+
+		for (auto && value: range) {
+			result.emplace_back(std::move(value));
+		}
+
+		return result;
+	}
+
+	auto find_ngram_occurences(ngram<N> value) const noexcept -> const std::set<entry> * {
+		if (const auto it = data.find(value); it != data.end()) {
+			return std::addressof(it->second);
+		} else {
+			return nullptr;
+		}
+	}
+
+	auto find_first(view_as_ngrams<N> input) -> std::optional<PKey> {
+		std::cout << "SEARCHING FOR '" << input.input << "' ngram = " << input.size() << "\n";
+
+		std::map<entry, unsigned> candidates;
+
+		// TODO optimization
+
+		// total complexity is O(len * (log(n) + k * log(k)))
+
+		// O(len)
+		for (auto ng: input) {
+			// find ngram set O(log n)
+			const std::set<entry> * occurences = find_ngram_occurences(ng.value);
+
+			if (occurences == nullptr) {
+				std::cout << "not found [some of ngrams doesn't exists!]\n";
+				return std::nullopt;
+			}
+
+			// increment each found item k * log(k)
+			for (const auto & e: *occurences) {
+				auto [it, success] = candidates.try_emplace(entry{e.pkey, e.position - ng.position}, 1);
+
+				if (!success) {
+					it->second++;
+				}
+			}
+		}
+
+		std::cout << "found\n";
+
+		for (auto [e, count]: candidates) {
+			if (count == input.size()) {
+				std::cout << "  " << std::addressof(*e.pkey) << " '" << *e.pkey << "'@" << e.position << " (hit_count = " << count << ")\n";
+			}
+		}
+
+		return std::nullopt;
 	}
 };
 
