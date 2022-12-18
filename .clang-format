@@ -82,7 +82,7 @@ IncludeCategories:
     SortPriority:    0
     CaseSensitive:   false
   - Regex:           '^<catch2/.+>$'
-    Priority:        0
+    Priority:        8
     SortPriority:    0
     CaseSensitive:   false
   - Regex:           '^".+/.+"$'
