@@ -7,7 +7,7 @@ using namespace std::string_view_literals;
 TEST_CASE("simple fulltext") {
 	std::set<std::string, std::less<void>> strings;
 
-	ctdb::simple_fulltext_reverse_index<decltype(strings)::iterator, 2> index;
+	ctdb::simple_fulltext_reverse_index<decltype(strings)::iterator, 4> index;
 
 	auto add = [&](std::string_view in) {
 		auto [it, success] = strings.emplace(std::string{in});
@@ -64,4 +64,5 @@ TEST_CASE("simple fulltext") {
 	search("lorem ipsum");
 	search("hana");
 	search("is the");
+	search("lly long text, this is really long text, this is");
 }

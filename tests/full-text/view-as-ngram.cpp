@@ -1,12 +1,13 @@
 #include <ctdb/indices/full-text.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+using namespace ctdb::support;
 using namespace std::string_view_literals;
 
 TEST_CASE("view_as_ngram basic") {
 	constexpr auto in = "aloha"sv;
 
-	const auto rng = ctdb::view_as_ngrams<3>(in);
+	const auto rng = view_as_ngrams<3>(in);
 
 	REQUIRE(rng.size() == 3);
 
@@ -14,15 +15,15 @@ TEST_CASE("view_as_ngram basic") {
 	const auto end = rng.end();
 
 	REQUIRE(it != end);
-	REQUIRE(*it == ctdb::ngram_with_position<3>{"alo", 0});
+	REQUIRE(*it == ngram_with_position<3>{"alo", 0});
 	++it;
 
 	REQUIRE(it != end);
-	REQUIRE(*it == ctdb::ngram_with_position<3>{"loh", 1});
+	REQUIRE(*it == ngram_with_position<3>{"loh", 1});
 	++it;
 
 	REQUIRE(it != end);
-	REQUIRE(*it == ctdb::ngram_with_position<3>{"oha", 2});
+	REQUIRE(*it == ngram_with_position<3>{"oha", 2});
 	++it;
 
 	REQUIRE(it == end);
@@ -31,31 +32,19 @@ TEST_CASE("view_as_ngram basic") {
 	REQUIRE(std::forward_iterator<decltype(it)>);
 
 	// try if we can iterate it
-	std::vector<ctdb::ngram_with_position<3>> vec;
+	std::vector<ngram_with_position<3>> vec;
 
 	for (auto ngram: rng) {
 		vec.push_back(ngram);
 	}
 
-	REQUIRE(vec == std::vector<ctdb::ngram_with_position<3>>{{"alo", 0}, {"loh", 1}, {"oha", 2}});
-}
-
-constexpr auto convert_to_vector(auto && range) {
-	using value_type = std::remove_cvref_t<decltype(*range.begin())>;
-
-	std::vector<value_type> result{};
-
-	for (auto && value: range) {
-		result.emplace_back(std::move(value));
-	}
-
-	return result;
+	REQUIRE(vec == std::vector<ngram_with_position<3>>{{"alo", 0}, {"loh", 1}, {"oha", 2}});
 }
 
 TEST_CASE("view_as_ngram basic (charlotte, 2)") {
 	constexpr auto input = "charlotte";
 
-	using ngram_view = ctdb::view_as_ngrams<2>;
+	using ngram_view = view_as_ngrams<2>;
 
 	REQUIRE(ngram_view(input).size() == 8z);
 
@@ -67,7 +56,7 @@ TEST_CASE("view_as_ngram basic (charlotte, 2)") {
 TEST_CASE("view_as_ngram basic (charlotte, 3)") {
 	constexpr auto input = "charlotte";
 
-	using ngram_view = ctdb::view_as_ngrams<3>;
+	using ngram_view = view_as_ngrams<3>;
 
 	REQUIRE(ngram_view(input).size() == 7z);
 
@@ -79,7 +68,7 @@ TEST_CASE("view_as_ngram basic (charlotte, 3)") {
 TEST_CASE("view_as_ngram basic (charlotte, 4)") {
 	constexpr auto input = "charlotte";
 
-	using ngram_view = ctdb::view_as_ngrams<4>;
+	using ngram_view = view_as_ngrams<4>;
 
 	REQUIRE(ngram_view(input).size() == 6z);
 
@@ -91,7 +80,7 @@ TEST_CASE("view_as_ngram basic (charlotte, 4)") {
 TEST_CASE("view_as_ngram basic (charlotte, 5)") {
 	constexpr auto input = "charlotte";
 
-	using ngram_view = ctdb::view_as_ngrams<5>;
+	using ngram_view = view_as_ngrams<5>;
 
 	REQUIRE(ngram_view(input).size() == 5z);
 
